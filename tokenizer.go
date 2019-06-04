@@ -1,10 +1,15 @@
 package tools
 
-import "gopkg.in/bblfsh/sdk.v1/uast"
+import (
+	"github.com/bblfsh/go-client/v4/tools"
+	"github.com/bblfsh/sdk/v3/uast"
+	"github.com/bblfsh/sdk/v3/uast/nodes"
+)
 
+// Tokenizer sub-command outputs every token to STDOUT.
 type Tokenizer struct{}
 
-func (t Tokenizer) Exec(node *uast.Node) error {
+func (t Tokenizer) Exec(node nodes.Node) error {
 	for _, token := range Tokens(node) {
 		print(token)
 	}
@@ -12,18 +17,14 @@ func (t Tokenizer) Exec(node *uast.Node) error {
 }
 
 // Tokens returns a slice of tokens contained in the node.
-func Tokens(n *uast.Node) []string {
+func Tokens(n nodes.Node) []string {
 	var tokens []string
-	iter := uast.NewOrderPathIter(uast.NewPath(n))
-	for {
-		p := iter.Next()
-		if p.IsEmpty() {
-			break
-		}
+	iter := tools.NewIterator(n, tools.PreOrder)
 
-		n := p.Node()
-		if n.Token != "" {
-			tokens = append(tokens, n.Token)
+	for n := range tools.Iterate(iter) {
+		token := uast.TokenOf(n)
+		if token != "" {
+			tokens = append(tokens, token)
 		}
 	}
 	return tokens

@@ -3,17 +3,22 @@ package tools
 import (
 	"fmt"
 
-	"gopkg.in/bblfsh/sdk.v1/uast"
+	"github.com/bblfsh/go-client/v4/tools"
+	"github.com/bblfsh/sdk/v3/uast"
+	"github.com/bblfsh/sdk/v3/uast/nodes"
+	"github.com/bblfsh/sdk/v3/uast/role"
 )
 
+// NPath is a sub-command that computes NPath complexity.
 type NPath struct{}
 
+// NPathData represents a complexity for a single function.
 type NPathData struct {
 	Name       string
 	Complexity int
 }
 
-func (np NPath) Exec(n *uast.Node) error {
+func (np NPath) Exec(n nodes.Node) error {
 	result := NPathComplexity(n)
 	fmt.Println(result)
 	return nil
@@ -23,29 +28,28 @@ func (nd *NPathData) String() string {
 	return fmt.Sprintf("FuncName:%s, Complexity:%d\n", nd.Name, nd.Complexity)
 }
 
-//Npath computes the NPath of functions in a *uast.Node.
-//
-//PMD is considered the reference implementation to assert correctness.
-//See: https://pmd.github.io/pmd-5.7.0/pmd-java/xref/net/sourceforge/pmd/lang/java/rule/codesize/NPathComplexityRule.html
-func NPathComplexity(n *uast.Node) []*NPathData {
+// NPathComplexity computes the NPath of functions in a *nodes.Node.
+// PMD is considered the reference implementation to assert correctness.
+// See: https://pmd.github.io/pmd-5.7.0/pmd-java/xref/net/sourceforge/pmd/lang/java/rule/codesize/NPathComplexityRule.html
+func NPathComplexity(n nodes.Node) []*NPathData {
 	var result []*NPathData
-	var funcs []*uast.Node
+	var funcs []nodes.Node
 	var names []string
 
-	if containsRoles(n, []uast.Role{uast.Function, uast.Body}, nil) {
+	if containsRoles(n, []role.Role{role.Function, role.Body}, nil) {
 		funcs = append(funcs, n)
 		names = append(names, "NoName")
 	} else {
-		funcDecs := deepChildrenOfRoles(n, []uast.Role{uast.Function, uast.Declaration}, []uast.Role{uast.Argument})
+		funcDecs := deepChildrenOfRoles(n, []role.Role{role.Function, role.Declaration}, []role.Role{role.Argument})
 		for _, funcDec := range funcDecs {
-			if containsRoles(funcDec, []uast.Role{uast.Function, uast.Name}, nil) {
-				names = append(names, funcDec.Token)
+			if containsRoles(funcDec, []role.Role{role.Function, role.Name}, nil) {
+				names = append(names, uast.TokenOf(funcDec))
 			}
-			childNames := childrenOfRoles(funcDec, []uast.Role{uast.Function, uast.Name}, nil)
+			childNames := childrenOfRoles(funcDec, []role.Role{role.Function, role.Name}, nil)
 			if len(childNames) > 0 {
-				names = append(names, childNames[0].Token)
+				names = append(names, uast.TokenOf(childNames[0]))
 			}
-			childFuncs := childrenOfRoles(funcDec, []uast.Role{uast.Function, uast.Body}, nil)
+			childFuncs := childrenOfRoles(funcDec, []role.Role{role.Function, role.Body}, nil)
 			if len(childFuncs) > 0 {
 				funcs = append(funcs, childFuncs[0])
 			}
@@ -59,53 +63,55 @@ func NPathComplexity(n *uast.Node) []*NPathData {
 	return result
 }
 
-func visitorSelector(n *uast.Node) int {
-	if containsRoles(n, []uast.Role{uast.Statement, uast.If}, []uast.Role{uast.Then, uast.Else}) {
+func visitorSelector(n nodes.Node) int {
+	if containsRoles(n, []role.Role{role.Statement, role.If}, []role.Role{role.Then, role.Else}) {
 		return visitIf(n)
 	}
-	if containsRoles(n, []uast.Role{uast.Statement, uast.While}, nil) {
+	if containsRoles(n, []role.Role{role.Statement, role.While}, nil) {
 		return visitWhile(n)
 	}
-	if containsRoles(n, []uast.Role{uast.Statement, uast.Switch}, nil) {
+	if containsRoles(n, []role.Role{role.Statement, role.Switch}, nil) {
 		return visitSwitch(n)
 	}
-	if containsRoles(n, []uast.Role{uast.Statement, uast.DoWhile}, nil) {
+	if containsRoles(n, []role.Role{role.Statement, role.DoWhile}, nil) {
 		return visitDoWhile(n)
 	}
-	if containsRoles(n, []uast.Role{uast.Statement, uast.For}, nil) {
+	if containsRoles(n, []role.Role{role.Statement, role.For}, nil) {
 		return visitFor(n)
 	}
-	if containsRoles(n, []uast.Role{uast.Statement, uast.Return}, nil) {
+	if containsRoles(n, []role.Role{role.Statement, role.Return}, nil) {
 		return visitReturn(n)
 	}
-	if containsRoles(n, []uast.Role{uast.Statement, uast.Try}, nil) {
+	if containsRoles(n, []role.Role{role.Statement, role.Try}, nil) {
 		return visitTry(n)
 	}
 	return visitNotCompNode(n)
 }
 
-func complexityMultOf(n *uast.Node) int {
+func complexityMultOf(n nodes.Node) int {
 	npath := 1
-	for _, child := range n.Children {
+	it, _ := tools.Filter(n, "/*")
+	for it.Next() {
+		child := it.Node().(nodes.Node)
 		npath *= visitorSelector(child)
 	}
 	return npath
 }
 
-func visitFunctionBody(n *uast.Node) int {
+func visitFunctionBody(n nodes.Node) int {
 	return complexityMultOf(n)
 }
 
-func visitNotCompNode(n *uast.Node) int {
+func visitNotCompNode(n nodes.Node) int {
 	return complexityMultOf(n)
 }
 
-func visitIf(n *uast.Node) int {
+func visitIf(n nodes.Node) int {
 	// (npath of if + npath of else (or 1) + bool_comp of if) * npath of next
 	npath := 0
-	ifThen := childrenOfRoles(n, []uast.Role{uast.If, uast.Then}, nil)
-	ifCondition := childrenOfRoles(n, []uast.Role{uast.If, uast.Condition}, nil)
-	ifElse := childrenOfRoles(n, []uast.Role{uast.If, uast.Else}, nil)
+	ifThen := childrenOfRoles(n, []role.Role{role.If, role.Then}, nil)
+	ifCondition := childrenOfRoles(n, []role.Role{role.If, role.Condition}, nil)
+	ifElse := childrenOfRoles(n, []role.Role{role.If, role.Else}, nil)
 
 	if len(ifElse) > 0 {
 		npath += complexityMultOf(ifElse[0])
@@ -118,12 +124,12 @@ func visitIf(n *uast.Node) int {
 	return npath
 }
 
-func visitWhile(n *uast.Node) int {
+func visitWhile(n nodes.Node) int {
 	// (npath of while + bool_comp of while + npath of else (or 1)) * npath of next
 	npath := 0
-	whileCondition := childrenOfRoles(n, []uast.Role{uast.While, uast.Condition}, nil)
-	whileBody := childrenOfRoles(n, []uast.Role{uast.While, uast.Body}, nil)
-	whileElse := childrenOfRoles(n, []uast.Role{uast.While, uast.Else}, nil)
+	whileCondition := childrenOfRoles(n, []role.Role{role.While, role.Condition}, nil)
+	whileBody := childrenOfRoles(n, []role.Role{role.While, role.Body}, nil)
+	whileElse := childrenOfRoles(n, []role.Role{role.While, role.Else}, nil)
 	// Some languages like python can have an else in a while loop
 	if len(whileElse) > 0 {
 		npath += complexityMultOf(whileElse[0])
@@ -137,11 +143,11 @@ func visitWhile(n *uast.Node) int {
 	return npath
 }
 
-func visitDoWhile(n *uast.Node) int {
+func visitDoWhile(n nodes.Node) int {
 	// (npath of do + bool_comp of do + 1) * npath of next
 	npath := 1
-	doWhileCondition := childrenOfRoles(n, []uast.Role{uast.DoWhile, uast.Condition}, nil)
-	doWhileBody := childrenOfRoles(n, []uast.Role{uast.DoWhile, uast.Body}, nil)
+	doWhileCondition := childrenOfRoles(n, []role.Role{role.DoWhile, role.Condition}, nil)
+	doWhileBody := childrenOfRoles(n, []role.Role{role.DoWhile, role.Body}, nil)
 
 	npath *= complexityMultOf(doWhileBody[0])
 	npath += expressionComp(doWhileCondition[0])
@@ -149,10 +155,10 @@ func visitDoWhile(n *uast.Node) int {
 	return npath
 }
 
-func visitFor(n *uast.Node) int {
+func visitFor(n nodes.Node) int {
 	// (npath of for + bool_comp of for + 1) * npath of next
 	npath := 1
-	forBody := childrenOfRoles(n, []uast.Role{uast.For, uast.Body}, nil)
+	forBody := childrenOfRoles(n, []role.Role{role.For, role.Body}, nil)
 	if len(forBody) > 0 {
 		npath *= complexityMultOf(forBody[0])
 	}
@@ -160,16 +166,16 @@ func visitFor(n *uast.Node) int {
 	return npath
 }
 
-func visitReturn(n *uast.Node) int {
+func visitReturn(n nodes.Node) int {
 	if aux := expressionComp(n); aux != 1 {
 		return aux - 1
 	}
 	return 1
 }
 
-func visitSwitch(n *uast.Node) int {
-	caseDefault := childrenOfRoles(n, []uast.Role{uast.Switch, uast.Default}, nil)
-	switchCases := childrenOfRoles(n, []uast.Role{uast.Statement, uast.Switch, uast.Case}, []uast.Role{uast.Body})
+func visitSwitch(n nodes.Node) int {
+	caseDefault := childrenOfRoles(n, []role.Role{role.Switch, role.Default}, nil)
+	switchCases := childrenOfRoles(n, []role.Role{role.Statement, role.Switch, role.Case}, []role.Role{role.Body})
 	npath := 0
 
 	if len(caseDefault) > 0 {
@@ -183,16 +189,16 @@ func visitSwitch(n *uast.Node) int {
 	return npath
 }
 
-func visitTry(n *uast.Node) int {
+func visitTry(n nodes.Node) int {
 	/*
 		In pmd they decided the complexity of a try is the summatory of the complexity
 		of the try body, catch body and finally body.I don't think this is the most acurate way
 		of doing this.
 	*/
 
-	tryBody := childrenOfRoles(n, []uast.Role{uast.Try, uast.Body}, nil)
-	tryCatch := childrenOfRoles(n, []uast.Role{uast.Try, uast.Catch}, nil)
-	tryFinaly := childrenOfRoles(n, []uast.Role{uast.Try, uast.Finally}, nil)
+	tryBody := childrenOfRoles(n, []role.Role{role.Try, role.Body}, nil)
+	tryCatch := childrenOfRoles(n, []role.Role{role.Try, role.Catch}, nil)
+	tryFinaly := childrenOfRoles(n, []role.Role{role.Try, role.Finally}, nil)
 
 	catchComp := 0
 	if len(tryCatch) > 0 {
@@ -209,20 +215,20 @@ func visitTry(n *uast.Node) int {
 	return npath
 }
 
-func visitConditionalExpr(n *uast.Node) {
+func visitConditionalExpr(n nodes.Node) {
 	// TODO ternary operators are not defined on the UAST yet
 }
 
-func expressionComp(n *uast.Node) int {
-	orCount := deepCountChildrenOfRoles(n, []uast.Role{uast.Operator, uast.Boolean, uast.And}, nil)
-	andCount := deepCountChildrenOfRoles(n, []uast.Role{uast.Operator, uast.Boolean, uast.Or}, nil)
+func expressionComp(n nodes.Node) int {
+	orCount := deepCountChildrenOfRoles(n, []role.Role{role.Operator, role.Boolean, role.And}, nil)
+	andCount := deepCountChildrenOfRoles(n, []role.Role{role.Operator, role.Boolean, role.Or}, nil)
 
 	return orCount + andCount + 1
 }
 
-func containsRoles(n *uast.Node, andRoles []uast.Role, notRoles []uast.Role) bool {
-	roleMap := make(map[uast.Role]bool)
-	for _, r := range n.Roles {
+func containsRoles(n nodes.Node, andRoles []role.Role, notRoles []role.Role) bool {
+	roleMap := make(map[role.Role]bool)
+	for _, r := range uast.RolesOf(n) {
 		roleMap[r] = true
 	}
 	for _, r := range andRoles {
@@ -240,9 +246,11 @@ func containsRoles(n *uast.Node, andRoles []uast.Role, notRoles []uast.Role) boo
 	return true
 }
 
-func childrenOfRoles(n *uast.Node, andRoles []uast.Role, notRoles []uast.Role) []*uast.Node {
-	var children []*uast.Node
-	for _, child := range n.Children {
+func childrenOfRoles(n nodes.Node, andRoles []role.Role, notRoles []role.Role) []nodes.Node {
+	var children []nodes.Node
+	it, _ := tools.Filter(n, "/*")
+	for it.Next() {
+		child := it.Node().(nodes.Node)
 		if containsRoles(child, andRoles, notRoles) {
 			children = append(children, child)
 		}
@@ -250,9 +258,11 @@ func childrenOfRoles(n *uast.Node, andRoles []uast.Role, notRoles []uast.Role) [
 	return children
 }
 
-func deepChildrenOfRoles(n *uast.Node, andRoles []uast.Role, notRoles []uast.Role) []*uast.Node {
-	var childList []*uast.Node
-	for _, child := range n.Children {
+func deepChildrenOfRoles(n nodes.Node, andRoles []role.Role, notRoles []role.Role) []nodes.Node {
+	var childList []nodes.Node
+	it, _ := tools.Filter(n, "/*")
+	for it.Next() {
+		child := it.Node().(nodes.Node)
 		if containsRoles(child, andRoles, notRoles) {
 			childList = append(childList, child)
 		}
@@ -261,9 +271,11 @@ func deepChildrenOfRoles(n *uast.Node, andRoles []uast.Role, notRoles []uast.Rol
 	return childList
 }
 
-func countChildrenOfRoles(n *uast.Node, andRoles []uast.Role, notRoles []uast.Role) int {
+func countChildrenOfRoles(n nodes.Node, andRoles []role.Role, notRoles []role.Role) int {
 	count := 0
-	for _, child := range n.Children {
+	it, _ := tools.Filter(n, "./*")
+	for it.Next() {
+		child := it.Node().(nodes.Node)
 		if containsRoles(child, andRoles, notRoles) {
 			count++
 		}
@@ -271,9 +283,11 @@ func countChildrenOfRoles(n *uast.Node, andRoles []uast.Role, notRoles []uast.Ro
 	return count
 }
 
-func deepCountChildrenOfRoles(n *uast.Node, andRoles []uast.Role, notRoles []uast.Role) int {
+func deepCountChildrenOfRoles(n nodes.Node, andRoles []role.Role, notRoles []role.Role) int {
 	count := 0
-	for _, child := range n.Children {
+	it, _ := tools.Filter(n, "/*")
+	for it.Next() {
+		child := it.Node().(nodes.Node)
 		if containsRoles(child, andRoles, notRoles) {
 			count++
 		}

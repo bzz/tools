@@ -3,11 +3,14 @@ package tools
 import (
 	"fmt"
 
-	"gopkg.in/bblfsh/sdk.v1/uast"
+	"github.com/bblfsh/go-client/v4/tools"
+	"github.com/bblfsh/sdk/v3/uast"
+	"github.com/bblfsh/sdk/v3/uast/nodes"
+	"github.com/bblfsh/sdk/v3/uast/role"
 )
 
-// CyclomaticComplexity returns the cyclomatic complexity for the node. The cyclomatic complexity
-// is a quantitative measure of the number of linearly independent paths through a program's source code.
+// The cyclomatic complexity is a quantitative measure of the number of linearly
+// independent paths through a program's source code.
 // It was developed by Thomas J. McCabe, Sr. in 1976. For a formal description see:
 // https://en.wikipedia.org/wiki/Cyclomatic_complexity
 // And the original paper: http://www.literateprogramming.com/mccabe.pdf
@@ -46,27 +49,24 @@ import (
 // evaluate more than two items with a single operator.  (FIXME when both things are solved in the UAST
 // definition and the SDK).
 
+// CyclomaticComplexity is a sub-command that compuets cyclomatic complexity.
 type CyclomaticComplexity struct{}
 
-func (cc CyclomaticComplexity) Exec(n *uast.Node) error {
+func (cc CyclomaticComplexity) Exec(n nodes.Node) error {
 	result := cyclomaticComplexity(n)
 	fmt.Println("Cyclomatic Complexity = ", result)
 	return nil
 }
 
-func cyclomaticComplexity(n *uast.Node) int {
+// cyclomaticComplexity returns the cyclomatic complexity for the node.
+func cyclomaticComplexity(n nodes.Node) int {
 	complexity := 1
 
-	iter := uast.NewOrderPathIter(uast.NewPath(n))
+	iter := tools.NewIterator(n, tools.PreOrder)
 
-	for {
-		p := iter.Next()
-		if p.IsEmpty() {
-			break
-		}
-		n := p.Node()
-		roles := make(map[uast.Role]bool)
-		for _, r := range n.Roles {
+	for n := range tools.Iterate(iter) {
+		roles := make(map[role.Role]bool)
+		for _, r := range uast.RolesOf(n) {
 			roles[r] = true
 		}
 		if addsComplexity(roles) {
@@ -76,9 +76,9 @@ func cyclomaticComplexity(n *uast.Node) int {
 	return complexity
 }
 
-func addsComplexity(roles map[uast.Role]bool) bool {
-	return roles[uast.Statement] && (roles[uast.If] || roles[uast.Case] || roles[uast.For] || roles[uast.While] || roles[uast.DoWhile] || roles[uast.Continue]) ||
-		roles[uast.Try] && roles[uast.Catch] ||
-		roles[uast.Operator] && roles[uast.Boolean] ||
-		roles[uast.Goto]
+func addsComplexity(roles map[role.Role]bool) bool {
+	return roles[role.Statement] && (roles[role.If] || roles[role.Case] || roles[role.For] || roles[role.While] || roles[role.DoWhile] || roles[role.Continue]) ||
+		roles[role.Try] && roles[role.Catch] ||
+		roles[role.Operator] && roles[role.Boolean] ||
+		roles[role.Goto]
 }
