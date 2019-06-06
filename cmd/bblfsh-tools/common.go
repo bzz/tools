@@ -41,7 +41,7 @@ func (c *Common) execute(args []string, tool tools.Tooler) error {
 		Filename(filepath.Base(c.Args.File)).
 		UAST()
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	return tool.Exec(uast)
