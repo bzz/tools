@@ -28,7 +28,7 @@ func (nd *NPathData) String() string {
 	return fmt.Sprintf("FuncName:%s, Complexity:%d\n", nd.Name, nd.Complexity)
 }
 
-// NPathComplexity computes the NPath of functions in a *nodes.Node.
+// NPathComplexity computes the NPath of functions in a nodes.Node.
 // PMD is considered the reference implementation to assert correctness.
 // See: https://pmd.github.io/pmd-5.7.0/pmd-java/xref/net/sourceforge/pmd/lang/java/rule/codesize/NPathComplexityRule.html
 func NPathComplexity(n nodes.Node) []*NPathData {
